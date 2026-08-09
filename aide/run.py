@@ -4,7 +4,7 @@ import shutil
 
 from . import backend
 
-from .agent import Agent
+from .agent import Agent, determine_metric_direction
 from .interpreter import Interpreter
 from .journal import Journal, Node
 from .journal2report import journal2report
@@ -69,7 +69,7 @@ def run():
 
     atexit.register(cleanup)
 
-    journal = Journal()
+    journal = Journal(metric_maximize=determine_metric_direction(task_desc, cfg.agent))
     agent = Agent(
         task_desc=task_desc,
         cfg=cfg,

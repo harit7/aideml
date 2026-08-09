@@ -173,7 +173,9 @@ class Journal(DataClassJsonMixin):
             return
 
         for metric in metrics:
-            if metric.maximize != self.metric_maximize:
+            if metric.maximize is None:
+                metric.maximize = self.metric_maximize
+            elif metric.maximize != self.metric_maximize:
                 logger.warning(
                     "Metric direction changed from %s to %s; using the journal direction",
                     metric.maximize,

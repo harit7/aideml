@@ -43,6 +43,62 @@ review_func_spec = FunctionSpec(
     description="Submit a review evaluating the output of the training script.",
 )
 
+metric_direction_func_spec = FunctionSpec(
+    name="submit_metric_direction",
+    json_schema={
+        "type": "object",
+        "properties": {
+            "lower_is_better": {
+                "type": "boolean",
+                "description": "true if the validation metric for this task should be minimized (i.e. a lower metric value is better, such as with MSE), false if it should be maximized (i.e. a higher metric value is better, such as with accuracy).",
+            },
+        },
+        "required": ["lower_is_better"],
+    },
+    description="Report whether the task's validation metric should be minimized or maximized.",
+)
+
+
+def determine_metric_direction(task_desc, acfg) -> bool | None:
+    """Determine the task-level optimization direction of the validation metric.
+
+    Uses the `agent.metric_maximize` config override if set, otherwise queries
+    the feedback model once with the task description. Returns True if the
+    metric should be maximized, False if it should be minimized, or None if the
+    direction could not be determined (the journal then falls back to the
+    direction reported for the first node).
+    """
+    if acfg.metric_maximize is not None:
+        return acfg.metric_maximize
+
+    prompt = {
+        "Introduction": (
+            "You are assessing a machine learning task. "
+            "Based on the task description below, determine whether the validation metric "
+            "for this task should be minimized or maximized."
+        ),
+        "Task description": task_desc,
+    }
+    try:
+        response = cast(
+            dict,
+            query(
+                system_message=prompt,
+                user_message=None,
+                func_spec=metric_direction_func_spec,
+                model=acfg.feedback.model,
+                temperature=acfg.feedback.temp,
+            ),
+        )
+        return not response["lower_is_better"]
+    except Exception:
+        logger.warning(
+            "Failed to infer the metric direction from the task description; "
+            "falling back to the direction reported for the first node",
+            exc_info=True,
+        )
+        return None
+
 
 class Agent:
     def __init__(

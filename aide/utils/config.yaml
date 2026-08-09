@@ -40,6 +40,10 @@ agent:
   expose_prediction: False
   # whether to provide the agent with a preview of the data
   data_preview: True
+  # optimization direction of the validation metric: true if higher is better,
+  # false if lower is better; leave null to infer it from the task description
+  # with a single LLM call at the start of the run
+  metric_maximize: null
 
   # LLM settings for coding
   code:
