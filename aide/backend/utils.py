@@ -1,32 +1,35 @@
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+import backoff
 import jsonschema
 from dataclasses_json import DataClassJsonMixin
-import backoff
-import logging
-from typing import Callable
 
 PromptType = str | dict | list
 FunctionCallType = dict
 OutputType = str | FunctionCallType
 
 
-logger = logging.getLogger("aide")
+BACKOFF_MAX_TRIES = 5
 
 
-@backoff.on_predicate(
-    wait_gen=backoff.expo,
-    max_value=60,
-    factor=1.5,
-)
 def backoff_create(
-    create_fn: Callable, retry_exceptions: list[Exception], *args, **kwargs
+    create_fn: Callable,
+    retry_exceptions: Sequence[type[Exception]],
+    *args,
+    **kwargs,
 ):
-    try:
+    @backoff.on_exception(
+        wait_gen=backoff.expo,
+        exception=tuple(retry_exceptions),
+        max_value=60,
+        factor=1.5,
+        max_tries=BACKOFF_MAX_TRIES,
+    )
+    def create():
         return create_fn(*args, **kwargs)
-    except retry_exceptions as e:
-        logger.info(f"Backoff exception: {e}")
-        return False
+
+    return create()
 
 
 def opt_messages_to_list(
