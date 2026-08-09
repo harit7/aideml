@@ -143,7 +143,7 @@ class Journal(DataClassJsonMixin):
     # eda: InteractiveSession = field(default_factory=lambda: InteractiveSession())
 
     def __post_init__(self) -> None:
-        self._canonicalize_metric_directions()
+        self._reconcile_metric_directions()
 
     def __getitem__(self, idx: int) -> Node:
         return self.nodes[idx]
@@ -156,9 +156,10 @@ class Journal(DataClassJsonMixin):
         """Append a new node to the journal."""
         node.step = len(self.nodes)
         self.nodes.append(node)
-        self._canonicalize_metric_directions()
+        self._reconcile_metric_directions()
+        self._warn_on_direction_conflict(node.metric)
 
-    def _canonicalize_metric_directions(self) -> None:
+    def _reconcile_metric_directions(self) -> None:
         metrics = [
             node.metric
             for node in self.nodes
@@ -172,16 +173,26 @@ class Journal(DataClassJsonMixin):
         if self.metric_maximize is None:
             return
 
-        for metric in metrics:
-            if metric.maximize is None:
-                metric.maximize = self.metric_maximize
-            elif metric.maximize != self.metric_maximize:
-                logger.warning(
-                    "Metric direction changed from %s to %s; using the journal direction",
-                    metric.maximize,
-                    self.metric_maximize,
-                )
-                metric.maximize = self.metric_maximize
+    def _warn_on_direction_conflict(self, metric: MetricValue | None) -> None:
+        if (
+            metric is not None
+            and not metric.is_worst
+            and self.metric_maximize is not None
+            and metric.maximize is not None
+            and metric.maximize != self.metric_maximize
+        ):
+            logger.warning(
+                "Metric direction %s disagrees with journal direction %s",
+                metric.maximize,
+                self.metric_maximize,
+            )
+
+    def _metric_rank(self, metric: MetricValue | None) -> tuple[bool, float]:
+        if metric is None or metric.is_worst:
+            return False, 0.0
+        assert metric.value is not None
+        value = float(metric.value)
+        return True, value if self.metric_maximize else -value
 
     @property
     def draft_nodes(self) -> list[Node]:
@@ -204,14 +215,16 @@ class Journal(DataClassJsonMixin):
 
     def get_best_node(self, only_good=True) -> None | Node:
         """Return the best solution found so far (node with the highest validation metric)."""
-        self._canonicalize_metric_directions()
+        self._reconcile_metric_directions()
         if only_good:
             nodes = self.good_nodes
             if not nodes:
                 return None
         else:
             nodes = self.nodes
-        return max(nodes, key=lambda n: n.metric)
+        if self.metric_maximize is None:
+            return max(nodes, key=lambda n: n.metric)
+        return max(nodes, key=lambda n: self._metric_rank(n.metric))
 
     def generate_summary(self, include_code: bool = False) -> str:
         """Generate a summary of the journal for the agent."""

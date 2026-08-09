@@ -96,7 +96,7 @@ def _node(value, maximize):
     )
 
 
-def test_journal_canonicalizes_conflicting_direction(caplog):
+def test_journal_reconciles_conflicting_direction(caplog):
     journal = Journal()
     first = _node(0.9, maximize=True)
     conflicting = _node(0.85, maximize=False)
@@ -105,9 +105,13 @@ def test_journal_canonicalizes_conflicting_direction(caplog):
     journal.append(conflicting)
 
     assert journal.metric_maximize is True
-    assert conflicting.metric.maximize is True
+    assert conflicting.metric.maximize is False
     assert journal.get_best_node() is first
-    assert "using the journal direction" in caplog.text
+    assert "disagrees with journal direction" in caplog.text
+
+    caplog.clear()
+    journal.get_best_node()
+    assert "disagrees with journal direction" not in caplog.text
 
 
 def test_best_node_is_permutation_invariant():

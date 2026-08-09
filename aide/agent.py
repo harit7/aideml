@@ -1,5 +1,6 @@
 import logging
 import random
+from dataclasses import dataclass
 from typing import Any, Callable, cast
 
 import humanize
@@ -43,39 +44,49 @@ review_func_spec = FunctionSpec(
     description="Submit a review evaluating the output of the training script.",
 )
 
-metric_direction_func_spec = FunctionSpec(
-    name="submit_metric_direction",
+task_metric_func_spec = FunctionSpec(
+    name="submit_task_metric",
     json_schema={
         "type": "object",
         "properties": {
+            "metric_name": {
+                "type": "string",
+                "description": "the validation metric every solution should use; reproduce the task's exact metric when one is specified, otherwise choose one such as RMSE, log loss, or accuracy",
+            },
             "lower_is_better": {
                 "type": "boolean",
                 "description": "true if the validation metric for this task should be minimized (i.e. a lower metric value is better, such as with MSE), false if it should be maximized (i.e. a higher metric value is better, such as with accuracy).",
             },
         },
-        "required": ["lower_is_better"],
+        "required": ["metric_name", "lower_is_better"],
     },
-    description="Report whether the task's validation metric should be minimized or maximized.",
+    description="Choose the task's validation metric and report whether it should be minimized or maximized.",
 )
 
 
-def determine_metric_direction(task_desc, acfg) -> bool | None:
-    """Determine the task-level optimization direction of the validation metric.
+@dataclass(frozen=True)
+class TaskMetric:
+    name: str | None
+    maximize: bool
+
+
+def determine_task_metric(task_desc, acfg) -> TaskMetric | None:
+    """Choose one task-level metric and its optimization direction.
 
     Uses the `agent.metric_maximize` config override if set, otherwise queries
-    the feedback model once with the task description. Returns True if the
-    metric should be maximized, False if it should be minimized, or None if the
-    direction could not be determined (the journal then falls back to the
-    direction reported for the first node).
+    the feedback model once with the task description. When the model chooses
+    the metric, callers must add that metric to the task description so code
+    generation and direction resolution refer to the same objective.
     """
     if acfg.metric_maximize is not None:
-        return acfg.metric_maximize
+        return TaskMetric(name=None, maximize=acfg.metric_maximize)
 
     prompt = {
         "Introduction": (
             "You are assessing a machine learning task. "
-            "Based on the task description below, determine whether the validation metric "
-            "for this task should be minimized or maximized."
+            "Use the exact validation metric from the task when one is specified. "
+            "Otherwise, choose one validation metric that every solution must use. "
+            "Determine whether that metric should be minimized or maximized."
         ),
         "Task description": task_desc,
     }
@@ -85,12 +96,18 @@ def determine_metric_direction(task_desc, acfg) -> bool | None:
             query(
                 system_message=prompt,
                 user_message=None,
-                func_spec=metric_direction_func_spec,
+                func_spec=task_metric_func_spec,
                 model=acfg.feedback.model,
                 temperature=acfg.feedback.temp,
             ),
         )
-        return not response["lower_is_better"]
+        metric_name = response["metric_name"]
+        lower_is_better = response["lower_is_better"]
+        if not isinstance(metric_name, str) or not metric_name.strip():
+            raise ValueError("metric direction response omitted a metric name")
+        if not isinstance(lower_is_better, bool):
+            raise ValueError("metric direction response was not boolean")
+        return TaskMetric(name=metric_name.strip(), maximize=not lower_is_better)
     except Exception:
         logger.warning(
             "Failed to infer the metric direction from the task description; "
@@ -98,6 +115,33 @@ def determine_metric_direction(task_desc, acfg) -> bool | None:
             exc_info=True,
         )
         return None
+
+
+def add_task_metric(task_desc, task_metric: TaskMetric | None):
+    """Require the inferred metric in every subsequent solution."""
+    if task_metric is None:
+        return task_desc
+
+    direction = "maximize" if task_metric.maximize else "minimize"
+    if task_metric.name is None:
+        requirement = (
+            "Use one consistent validation metric for every solution and "
+            f"{direction} it."
+        )
+    else:
+        requirement = (
+            f"Use {task_metric.name} as the validation metric for every solution "
+            f"and {direction} it."
+        )
+    if isinstance(task_desc, dict):
+        task_desc = dict(task_desc)
+        existing = task_desc.get("Task evaluation")
+        task_desc["Task evaluation"] = (
+            f"{existing}\n\n{requirement}" if existing else requirement
+        )
+        return task_desc
+
+    return f"{task_desc.rstrip()}\n\n# Task evaluation\n{requirement}"
 
 
 class Agent:

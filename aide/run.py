@@ -4,7 +4,7 @@ import shutil
 
 from . import backend
 
-from .agent import Agent, determine_metric_direction
+from .agent import Agent, add_task_metric, determine_task_metric
 from .interpreter import Interpreter
 from .journal import Journal, Node
 from .journal2report import journal2report
@@ -58,6 +58,8 @@ def run():
     logger.info(f'Starting run "{cfg.exp_name}"')
 
     task_desc = load_task_desc(cfg)
+    task_metric = determine_task_metric(task_desc, cfg.agent)
+    task_desc = add_task_metric(task_desc, task_metric)
     task_desc_str = backend.compile_prompt_to_md(task_desc)
 
     with Status("Preparing agent workspace (copying and extracting files) ..."):
@@ -69,7 +71,9 @@ def run():
 
     atexit.register(cleanup)
 
-    journal = Journal(metric_maximize=determine_metric_direction(task_desc, cfg.agent))
+    journal = Journal(
+        metric_maximize=task_metric.maximize if task_metric is not None else None
+    )
     agent = Agent(
         task_desc=task_desc,
         cfg=cfg,

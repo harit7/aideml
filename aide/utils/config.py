@@ -45,12 +45,11 @@ class AgentConfig:
     k_fold_validation: int
     expose_prediction: bool
     data_preview: bool
-    metric_maximize: bool | None
-
     code: StageConfig
     feedback: StageConfig
 
     search: SearchConfig
+    metric_maximize: bool | None = None
 
 
 @dataclass

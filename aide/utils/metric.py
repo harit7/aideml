@@ -16,17 +16,11 @@ class MetricValue(DataClassJsonMixin):
 
     value: float | int | np.number | np.floating | np.ndarray | None
     maximize: bool | None = field(default=None, kw_only=True)
-    # the direction as originally reported (e.g. by the feedback LLM) before
-    # journal-level canonicalization; kept so that inconsistent per-node
-    # verdicts remain diagnosable from journal.json
-    reported_maximize: bool | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         if self.value is not None:
             assert isinstance(self.value, (float, int, np.number, np.floating))
             self.value = float(self.value)
-        if self.reported_maximize is None:
-            self.reported_maximize = self.maximize
 
     def __gt__(self, other) -> bool:
         """True if self is a _better_ (not necessarily larger) metric value than other"""

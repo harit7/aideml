@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from .agent import Agent, determine_metric_direction
+from .agent import Agent, add_task_metric, determine_task_metric
 from .interpreter import Interpreter
 from .journal import Journal
 from omegaconf import OmegaConf
@@ -37,12 +37,14 @@ class Experiment:
         self.cfg = prep_cfg(_cfg)
 
         self.task_desc = load_task_desc(self.cfg)
+        task_metric = determine_task_metric(self.task_desc, self.cfg.agent)
+        self.task_desc = add_task_metric(self.task_desc, task_metric)
 
         with Status("Preparing agent workspace (copying and extracting files) ..."):
             prep_agent_workspace(self.cfg)
 
         self.journal = Journal(
-            metric_maximize=determine_metric_direction(self.task_desc, self.cfg.agent)
+            metric_maximize=task_metric.maximize if task_metric is not None else None
         )
         self.agent = Agent(
             task_desc=self.task_desc,
