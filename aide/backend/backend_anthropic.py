@@ -53,7 +53,7 @@ def query(
         filtered_kwargs["model"] = model_name
         logger.debug(f"Using aliased model name: {model_name}")
 
-    if func_spec is not None and func_spec.name == "submit_review":
+    if func_spec is not None:
         filtered_kwargs["tools"] = [func_spec.as_anthropic_tool_dict]
         # Force tool use
         filtered_kwargs["tool_choice"] = func_spec.anthropic_tool_choice_dict
