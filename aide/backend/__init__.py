@@ -8,6 +8,10 @@ logger = logging.getLogger("aide")
 
 
 def determine_provider(model: str) -> str:
+    # llm_runtimes models (embedded claude-cli / local vLLM server) use the
+    # OpenAI backend pointed at the local OpenAI-compatible runtime server.
+    if model.startswith(("claudecli-", "local-")):
+        return "openai"
     # Check if model matches OpenAI patterns first
     if re.match(r"^(gpt-.*|o\d+(-.*)?|codex-mini-latest)$", model):
         return "openai"

@@ -16,6 +16,11 @@ OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 _client: openai.OpenAI = None  # type: ignore
 _custom_client: openai.OpenAI = None  # type: ignore
+_runtimes_client: openai.OpenAI = None  # type: ignore
+
+# Model-name prefixes served by the vendored llm_runtimes embedded server
+# ("claudecli-*" -> claude CLI, "local-*" -> local vLLM).
+LLM_RUNTIMES_PREFIXES = ("claudecli-", "local-")
 
 OPENAI_TIMEOUT_EXCEPTIONS = (
     openai.RateLimitError,
@@ -45,6 +50,26 @@ def _setup_custom_client():
         )
 
 
+def _setup_runtimes_client() -> openai.OpenAI:
+    """Client for the embedded llm_runtimes OpenAI-compatible server."""
+    global _runtimes_client
+    if _runtimes_client is None:
+        try:
+            from llm_runtimes import ensure_server
+        except ImportError as e:
+            raise ImportError(
+                "Models with a 'claudecli-' or 'local-' prefix require the "
+                "vendored 'llm_runtimes' package, which was not found on the "
+                "Python path. Run aide from the aideml repo root (where the "
+                "llm_runtimes/ directory lives), or add that directory to "
+                "PYTHONPATH / pip-install llm_runtimes."
+            ) from e
+        _runtimes_client = openai.OpenAI(
+            base_url=ensure_server(), api_key="llm-runtimes", max_retries=0
+        )
+    return _runtimes_client
+
+
 def query(
     system_message: str | None,
     user_message: str | None,
@@ -55,11 +80,18 @@ def query(
     Query the OpenAI API, optionally with function calling.
     If the model doesn't support function calling, gracefully degrade to text generation.
     """
-    # Setup clients
-    _setup_openai_client()
+    # llm_runtimes models talk to the embedded local server via the chat API
+    is_runtimes_model = str(model_kwargs.get("model") or "").startswith(
+        LLM_RUNTIMES_PREFIXES
+    )
+
+    # Setup clients (the default OpenAI client needs OPENAI_API_KEY, which is
+    # not required for llm_runtimes models)
+    if not is_runtimes_model:
+        _setup_openai_client()
 
     filtered_kwargs: dict = select_values(notnone, model_kwargs)
-    if "max_tokens" in filtered_kwargs:
+    if "max_tokens" in filtered_kwargs and not is_runtimes_model:
         filtered_kwargs["max_output_tokens"] = filtered_kwargs.pop("max_tokens")
 
     if (
@@ -71,10 +103,13 @@ def query(
     # Use different API based on whether this is a non-OpenAI model with custom base URL
     model_name = filtered_kwargs.get("model", "")
     is_openai_model = re.match(r"^(gpt-|o\d-|codex-mini-latest$)", model_name)
-    use_chat_api = os.getenv("OPENAI_BASE_URL") is not None and not is_openai_model
+    use_chat_api = is_runtimes_model or (
+        os.getenv("OPENAI_BASE_URL") is not None and not is_openai_model
+    )
 
     if use_chat_api:
-        _setup_custom_client()
+        if not is_runtimes_model:
+            _setup_custom_client()
         # Standard chat completions API (for local servers)
         messages = opt_messages_to_list(system_message, user_message)
         if func_spec is not None:
@@ -100,7 +135,11 @@ def query(
     try:
         if use_chat_api:
             # Use custom client if available, otherwise fall back to default
-            client_to_use = _custom_client if _custom_client else _client
+            client_to_use = (
+                _setup_runtimes_client()
+                if is_runtimes_model
+                else (_custom_client if _custom_client else _client)
+            )
             response = backoff_create(
                 client_to_use.chat.completions.create,
                 OPENAI_TIMEOUT_EXCEPTIONS,
@@ -128,7 +167,11 @@ def query(
             # Retry without function calling
             if use_chat_api:
                 # Use custom client if available, otherwise fall back to default
-                client_to_use = _custom_client if _custom_client else _client
+                client_to_use = (
+                _setup_runtimes_client()
+                if is_runtimes_model
+                else (_custom_client if _custom_client else _client)
+            )
                 response = backoff_create(
                     client_to_use.chat.completions.create,
                     OPENAI_TIMEOUT_EXCEPTIONS,
