@@ -80,3 +80,13 @@ out = query(system_message=None, user_message="Say hi", model="claudecli-haiku")
   suitable GPU.
 - The runtime server binds a fixed local port (default 8399) shared across
   scaffolds on the machine.
+
+## Test run (2026-08-12, overnight)
+
+- Task (simulated human input): classify sklearn 8x8 digits from a generated
+  train.csv/test.csv split; goal/eval strings in the command below.
+- Command: `aide data_dir=<dir> goal="Predict the digit label ..." eval="classification accuracy on a held-out validation split" agent.code.model=claudecli-sonnet agent.feedback.model=claudecli-haiku report.model=claudecli-sonnet agent.steps=6 exec.timeout=600`
+- Result: 6 nodes explored on CPU, best validation accuracy 0.9852 (SVM),
+  report + best solution + search tree in `runs/2026-08-12-digits/`.
+  One quirk: LightGBM timed out under CPU constraints; the agent handled it and
+  recommended follow-ups in the report.
